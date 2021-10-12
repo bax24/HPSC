@@ -1,8 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
-
-unsigned int number_triangles;
+#include <math.h>
 
 // Structure used to represent a scene by its parameters
 typedef struct scene_params {
@@ -39,21 +38,11 @@ typedef struct scene_params {
  * @param fp The file containing the data
  * @return An array of 9 * T floats
  */
-float *load_triangles(FILE *fp) {
-    // Get the number of triangles
-    fread(&number_triangles, sizeof(unsigned int), 1, fp); // Read the number of triangles
-    printf("\nNumber of triangles: %i\n", number_triangles);
-
-    // Allocate space
-    float *triangle_vertices = malloc(9 * number_triangles * sizeof(float));
-
-    // Populate the array
-    fread(triangle_vertices, sizeof(float), 9 * number_triangles, fp);
-
-    // Close the file
-    fclose(fp);
-
-    return triangle_vertices;
+float *load_triangles(FILE *fp, unsigned int number_triangles) {
+    float *triangles = malloc(9 * number_triangles * sizeof(float)); // Allocate space
+    fread(triangles, sizeof(float), 9 * number_triangles, fp); // Populate the array
+    fclose(fp); // Populate the array
+    return triangles;
 }
 
 
@@ -88,9 +77,9 @@ void print_scene(scene_struct *scene) {
 /**
  * Give the index of the beginning of triangle
  * @param triangle_idx the index of the triangle
+ * @param number_triangles The number of triangles
  */
 int get_triangle(int triangle_idx) {
-    assert(triangle_idx >= 0 && triangle_idx < number_triangles - 1);
     return triangle_idx *= 9;
 }
 
@@ -98,6 +87,7 @@ int get_triangle(int triangle_idx) {
  * Give the index of a vertex in a given triangle
  * @param triangle_idx The index of the triangle
  * @param point_idx The vertex (a,b,c)
+ * @param number_triangles The number of triangles
  */
 int get_point(int triangle_idx, int point_idx) {
     assert(point_idx >= 0 && point_idx < 3);
@@ -109,12 +99,59 @@ int get_point(int triangle_idx, int point_idx) {
  * @param triangle_idx The index of the triangle
  * @param point_idx The vertex of choice (a,b,c)
  * @param coord_idx The coordinate of choice (x,y,z)
+ * @param number_triangles The number of triangles
  */
-int get_coord(int triangle_idx, int point_idx, int coord_idx){
+int get_coord(int triangle_idx, int point_idx, int coord_idx) {
     assert(coord_idx >= 0 && coord_idx < 3);
     return get_point(triangle_idx, point_idx) + coord_idx;
 }
 
+/**
+ * Compute the vector AB
+ * @param triangles The list of triangles
+ * @param components Where to store the components
+ * @param point_a The point a
+ * @param point_b The point b
+ * @return A list of 3 floats representing the components of the vector
+ */
+void compute_vector(const float *triangles, float *components, const unsigned int point_a, const unsigned int point_b) {
+    for (int i = 0; i < 3; i++) {
+        components[i] = triangles[point_b + i] - triangles[point_a + i];
+    }
+}
+
+/**
+ * Computes the Euclidian norm of a 3D-vector
+ * @param vector
+ * @return
+ */
+double compute_norm(float* vector){
+    return sqrt(pow(vector[0], 2) + pow(vector[1], 2) + pow(vector[2], 2));
+}
+
+void vector_product(float *result, float *vector_a, float *vector_b){
+
+}
+
+void compute_shading_params(const float *triangles, float *shading_params,
+                            unsigned int number_triangles, scene_struct *scene) {
+    for (int i = 0; i < number_triangles; i++) {
+        // === Compute the normal of the triangle ===
+
+        // Compute AB and AC
+        float vector_ab[3] = {0, 0, 0}, vector_ac[3] = {0, 0, 0};
+        compute_vector(triangles, vector_ab, get_point(i, 0), get_point(i, 1));
+        compute_vector(triangles, vector_ac, get_point(i, 0), get_point(i, 2));
+
+        // Compute ||AB|| * ||AC||
+        double norm = compute_norm(vector_ab) * compute_norm(vector_ac);
+
+        // Change of coordinates
+
+        // Compute shading
+    }
+
+}
 
 int main(int argc, char **argv) {
 
@@ -138,15 +175,21 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    // Read the number of triangles
+    unsigned int number_triangles;
+    fread(&number_triangles, sizeof(unsigned int), 1, dataFile);
+    printf("\nNumber of triangles: %i\n", number_triangles);
+
     // Store the triangles
-    float *triangles = load_triangles(dataFile);
+    float *triangles = load_triangles(dataFile, number_triangles);
 
     // Store the scene parameters
     scene_struct scene;
     load_scene_params(paramsFile, &scene);
 
     // Shading parameters
-
+    float *shading_params = malloc(number_triangles * sizeof(float));
+    compute_shading_params(triangles, shading_params, number_triangles, &scene);
 
     // Terminate program
     free(triangles);
