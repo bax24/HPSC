@@ -1,27 +1,20 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 
-// Structure used to define a point in 3D-space
-typedef struct point {
-    float coordinates[3]; // List of 3 floats
-} point_struct;
-
-// Structure used to represent a triangle in 3D-space
-typedef struct triangle {
-    point_struct points[3]; // List of 3 points
-} triangle_struct;
+unsigned int number_triangles;
 
 // Structure used to represent a scene by its parameters
 typedef struct scene_params {
     // Object color
-    unsigned char object_r;
-    unsigned char object_g;
-    unsigned char object_b;
+    unsigned char object_r[4];
+    unsigned char object_g[4];
+    unsigned char object_b[4];
 
     // Background color
-    unsigned char background_r;
-    unsigned char background_g;
-    unsigned char background_b;
+    unsigned char background_r[4];
+    unsigned char background_g[4];
+    unsigned char background_b[4];
 
     // Camera coordinates
     float camera_x;
@@ -41,42 +34,87 @@ typedef struct scene_params {
 
 } scene_struct;
 
-triangle_struct *load_triangles(FILE *fp) {
-    unsigned int number_triangles;
+/**
+ * Load the data of the triangles into an array of float
+ * @param fp The file containing the data
+ * @return An array of 9 * T floats
+ */
+float *load_triangles(FILE *fp) {
+    // Get the number of triangles
     fread(&number_triangles, sizeof(unsigned int), 1, fp); // Read the number of triangles
-    printf("There are %u triangles\n", number_triangles); // ... and print them for readability
+    printf("\nNumber of triangles: %i\n", number_triangles);
 
-    triangle_struct *triangles = malloc(number_triangles * sizeof(triangle_struct)); // Allocate space for them
+    // Allocate space
+    float *triangle_vertices = malloc(9 * number_triangles * sizeof(float));
 
-    for (int i = 0; i < number_triangles; i++) { // Load those triangles into the allocated list
-        if (i % 1000 == 0) {
-            printf("Triangles loaded: %d\n", i);
-        }
+    // Populate the array
+    fread(triangle_vertices, sizeof(float), 9 * number_triangles, fp);
 
-        triangle_struct triangle;
+    // Close the file
+    fclose(fp);
 
-        // Populate a triangle
-        for (int j = 0; j < 3; j++) {
-            point_struct point;
-
-            // Populate a point
-            for (int k = 0; k < 3; k++) {
-                float value;
-                fread(&value, sizeof(float), 1, fp);
-                point.coordinates[k] = value;
-            }
-            triangle.points[j] = point;
-        }
-        triangles[i] = triangle;
-    }
-
-    return triangles;
+    return triangle_vertices;
 }
 
+
+/**
+ * Load the scene file into a structure that represents it
+ * @param fp The parameters file
+ * @param scene The structure in which the params are saved
+ */
 void load_scene_params(FILE *fp, scene_struct *scene) {
+    fscanf(fp, "%s %s %s", scene->object_r, scene->object_g, scene->object_b);
+    fscanf(fp, "%s %s %s", scene->background_r, scene->background_g, scene->background_b);
+    fscanf(fp, "%f %f %f", &scene->camera_x, &scene->camera_y, &scene->camera_z);
+    fscanf(fp, "%i %i", &scene->height, &scene->width);
+    fscanf(fp, "%f", &scene->vertical_fow);
+    fscanf(fp, "%f %f", &scene->near_clip, &scene->far_clip);
 
-    printf("Le voici: %uc", scene->object_r);
+    // Close the file
+    fclose(fp);
 }
+
+void print_scene(scene_struct *scene) {
+    printf("\nScene parameters\n");
+    printf("----------------\n");
+    printf("Object color: %s %s %s\n", scene->object_r, scene->object_g, scene->object_b);
+    printf("Background color: %s %s %s\n", scene->background_r, scene->background_g, scene->background_b);
+    printf("Camera position: %.2f %.2f %.2f\n", scene->camera_x, scene->camera_y, scene->camera_z);
+    printf("Height and width: %i %i\n", scene->height, scene->width);
+    printf("Vertical fow: %.6f\n", scene->vertical_fow);
+    printf("Near and far clip: %.2f %.2f\n", scene->near_clip, scene->far_clip);
+}
+
+/**
+ * Give the index of the beginning of triangle
+ * @param triangle_idx the index of the triangle
+ */
+int get_triangle(int triangle_idx) {
+    assert(triangle_idx >= 0 && triangle_idx < number_triangles - 1);
+    return triangle_idx *= 9;
+}
+
+/**
+ * Give the index of a vertex in a given triangle
+ * @param triangle_idx The index of the triangle
+ * @param point_idx The vertex (a,b,c)
+ */
+int get_point(int triangle_idx, int point_idx) {
+    assert(point_idx >= 0 && point_idx < 3);
+    return get_triangle(triangle_idx) + point_idx * 3;
+}
+
+/**
+ * Give the index of a coordinate in a given vertex from a given triangle
+ * @param triangle_idx The index of the triangle
+ * @param point_idx The vertex of choice (a,b,c)
+ * @param coord_idx The coordinate of choice (x,y,z)
+ */
+int get_coord(int triangle_idx, int point_idx, int coord_idx){
+    assert(coord_idx >= 0 && coord_idx < 3);
+    return get_point(triangle_idx, point_idx) + coord_idx;
+}
+
 
 int main(int argc, char **argv) {
 
@@ -88,26 +126,30 @@ int main(int argc, char **argv) {
     }
 
     FILE *dataFile = fopen(argv[1], "r");
-    FILE *paramsFile = fopen(argv[2], "r");
-
-    if (!dataFile) {
+    if (dataFile == NULL) {
         printf("Data file not readable");
         return 1;
     }
 
-    if (!paramsFile) {
+    FILE *paramsFile = fopen(argv[2], "r");
+    if (paramsFile == NULL) {
         printf("Parameters file not readable");
+        fclose(dataFile);
         return 1;
     }
 
-//    triangle_struct *triangles = load_triangles(dataFile);
+    // Store the triangles
+    float *triangles = load_triangles(dataFile);
+
+    // Store the scene parameters
     scene_struct scene;
     load_scene_params(paramsFile, &scene);
 
+    // Shading parameters
+
+
     // Terminate program
-//    free(triangles);
-    fclose(dataFile);
-    fclose(paramsFile);
+    free(triangles);
 
     return 0;
 }
