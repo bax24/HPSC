@@ -3,6 +3,8 @@
 #include <assert.h>
 #include <math.h>
 
+const double lightbeam_vector[3] = {-0.57735026919, -0.57735026919, -0.57735026919};
+
 // Structure used to represent a scene by its parameters
 typedef struct scene_params {
     // Object color
@@ -16,9 +18,7 @@ typedef struct scene_params {
     unsigned char background_b[4];
 
     // Camera coordinates
-    float camera_x;
-    float camera_y;
-    float camera_z;
+    float camera_coordinates[3];
 
     // Height and width of the 2D image
     unsigned int height;
@@ -54,24 +54,19 @@ float *load_triangles(FILE *fp, unsigned int number_triangles) {
 void load_scene_params(FILE *fp, scene_struct *scene) {
     fscanf(fp, "%s %s %s", scene->object_r, scene->object_g, scene->object_b);
     fscanf(fp, "%s %s %s", scene->background_r, scene->background_g, scene->background_b);
-    fscanf(fp, "%f %f %f", &scene->camera_x, &scene->camera_y, &scene->camera_z);
+
+    float camera_x, camera_y, camera_z;
+    fscanf(fp, "%f %f %f", &camera_x, &camera_y, &camera_z);
+    scene->camera_coordinates[0] = camera_x;
+    scene->camera_coordinates[1] = camera_y;
+    scene->camera_coordinates[2] = camera_z;
+
     fscanf(fp, "%i %i", &scene->height, &scene->width);
     fscanf(fp, "%f", &scene->vertical_fow);
     fscanf(fp, "%f %f", &scene->near_clip, &scene->far_clip);
 
     // Close the file
     fclose(fp);
-}
-
-void print_scene(scene_struct *scene) {
-    printf("\nScene parameters\n");
-    printf("----------------\n");
-    printf("Object color: %s %s %s\n", scene->object_r, scene->object_g, scene->object_b);
-    printf("Background color: %s %s %s\n", scene->background_r, scene->background_g, scene->background_b);
-    printf("Camera position: %.2f %.2f %.2f\n", scene->camera_x, scene->camera_y, scene->camera_z);
-    printf("Height and width: %i %i\n", scene->height, scene->width);
-    printf("Vertical fow: %.6f\n", scene->vertical_fow);
-    printf("Near and far clip: %.2f %.2f\n", scene->near_clip, scene->far_clip);
 }
 
 /**
@@ -121,36 +116,147 @@ void compute_vector(const float *triangles, float *components, const unsigned in
 }
 
 /**
- * Computes the Euclidian norm of a 3D-vector
- * @param vector
- * @return
+ * Computes the Euclidian norm of a vector
+ * @param vector The vector
+ * @param size The size of the vector
+ * @return A scalar
  */
-double compute_norm(float* vector){
-    return sqrt(pow(vector[0], 2) + pow(vector[1], 2) + pow(vector[2], 2));
+double compute_norm(float *vector, size_t size) {
+    double result = 0;
+    for (size_t i = 0; i < size; i++) {
+        result += pow(vector[i], 2);
+    }
+    return sqrt(result);
 }
 
-void vector_product(float *result, float *vector_a, float *vector_b){
+/**
+ * Compute the vector product of 3D vectors
+ * @param result The resulting vector
+ * @param u The first vector
+ * @param v The second vector
+ */
+void vector_product(float *result, const float *u, const float *v) {
+    result[0] = u[1] * v[2] - u[2] * v[1];
+    result[1] = u[2] * v[0] - u[0] * v[2];
+    result[2] = u[0] * v[1] - u[1] * v[0];
+}
 
+/**
+ * Compute the scalar product of 2 vectors
+ * @param u The first vector
+ * @param v The second vector
+ * @param size The size of the vectors
+ * @return The scalar product
+ */
+float scalar_product(const float *u, const float *v, size_t size) {
+    float result = 0;
+    for (size_t i = 0; i < size; i++) {
+        result += u[i] + v[i];
+    }
+    return result;
+}
+
+/**
+ * Scale a given vector by a scalar value
+ * @param v The vector
+ * @param scale The scalar
+ * @param size The size of the vector
+ */
+void scale_vector(float *v, float scale, size_t size) {
+    for (size_t i = 0; i < size; i++) {
+        v[i] *= scale;
+    }
 }
 
 void compute_shading_params(const float *triangles, float *shading_params,
-                            unsigned int number_triangles, scene_struct *scene) {
-    for (int i = 0; i < number_triangles; i++) {
-        // === Compute the normal of the triangle ===
+                            const unsigned int number_triangles) {
 
-        // Compute AB and AC
-        float vector_ab[3] = {0, 0, 0}, vector_ac[3] = {0, 0, 0};
+    for (int i = 0; i < (int) number_triangles; i++) {
+        // ######################################
+        // # Compute the normal of the triangle #
+        // ######################################
+
+        // Declare variables
+        float vector_ab[3] = {0, 0, 0}, vector_ac[3] = {0, 0, 0}, vector_normal[3] = {0, 0, 0};
+        float shading_value = 0;
+
+        // Compute both AB and AC
         compute_vector(triangles, vector_ab, get_point(i, 0), get_point(i, 1));
         compute_vector(triangles, vector_ac, get_point(i, 0), get_point(i, 2));
 
-        // Compute ||AB|| * ||AC||
-        double norm = compute_norm(vector_ab) * compute_norm(vector_ac);
+        // Compute the normal vector
+        vector_product(vector_normal, vector_ab, vector_ac);
+        double norm = compute_norm(vector_ab, 3) * compute_norm(vector_ac, 3);
+        scale_vector(vector_normal, 1.0 / norm, 3);
 
-        // Change of coordinates
+        // #################################
+        // # Compute the shading parameter #
+        // #################################
+        float result = scalar_product(vector_normal, (float *) lightbeam_vector, 3);
+        if (result > 0)
+            shading_value = result;
 
-        // Compute shading
+        shading_params[i] = shading_value;
+    }
+}
+
+void compute_world_to_view_coordinate(float *triangles, scene_struct *scene, const unsigned int number_triangles) {
+
+    // Declare variables
+    float E_u[3], E_v[3], *E_w;
+    float camera_distance;
+    float ground_plan_distance;
+
+    // Compute the distances
+    camera_distance = compute_norm(scene->camera_coordinates, 3);
+    float vector_tmp[2] = {scene->camera_coordinates[0], scene->camera_coordinates[1]};
+    ground_plan_distance = compute_norm(vector_tmp, 2);
+
+    // Compute E_u
+    E_u[0] = scene->camera_coordinates[2];
+    E_u[1] = 0;
+    E_u[2] = -scene->camera_coordinates[0];
+    scale_vector(E_u, 1 / ground_plan_distance, 3);
+
+    // Compute E_v
+    E_v[0] = -scene->camera_coordinates[0] * scene->camera_coordinates[1];
+    E_v[1] = pow(scene->camera_coordinates[2], 2) + pow(scene->camera_coordinates[0], 2);
+    E_v[2] = -scene->camera_coordinates[1] * scene->camera_coordinates[2];
+    scale_vector(E_v, 1 / camera_distance * ground_plan_distance, 3);
+
+    // Compute E_w
+    E_w = scene->camera_coordinates;
+    scale_vector(E_w, 1 / camera_distance, 3);
+
+    // Save the new system of coordinates for convenience
+    float *new_system[3] = {E_u, E_v, E_w};
+
+    // Compute to vector from the origin to the camera position
+    float *vector_om = scene->camera_coordinates;
+
+    // Compute the world to view matrix
+    float w_to_v[3][4];
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            w_to_v[i][j] = new_system[i][j];
+        }
+        w_to_v[i][3] = - scalar_product(vector_om, new_system[i], 3);
     }
 
+    // Iterate over the triangles
+    for (unsigned int i = 0; i < number_triangles; i++) {
+
+        // Iterate over the points of a triangle
+        for (int j = 0; j < 3; j++) {
+            float vector_column[4] = {get_coord(i, j, 0), get_coord(i, j, 1), get_coord(i, j, 2), 1.0};
+
+            // Iterate over the coordinates of the point
+            for(int k = 0; k < 3; k++){
+                int index = get_coord(i, j, k);
+                triangles[index] = scalar_product(w_to_v[k], vector_column, 4);
+            }
+        }
+    }
 }
 
 int main(int argc, char **argv) {
@@ -189,10 +295,14 @@ int main(int argc, char **argv) {
 
     // Shading parameters
     float *shading_params = malloc(number_triangles * sizeof(float));
-    compute_shading_params(triangles, shading_params, number_triangles, &scene);
+    compute_shading_params(triangles, shading_params, number_triangles);
+
+    // Change of coordinates
+    compute_world_to_view_coordinate(triangles, &scene, number_triangles);
 
     // Terminate program
     free(triangles);
+    free(shading_params);
 
     return 0;
 }
