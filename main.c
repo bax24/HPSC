@@ -2,20 +2,26 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <math.h>
+#include <string.h>
+#include <float.h>
+#include <stdbool.h>
+
+#define MIN(a, b) ( a < b ) ? a : b
+#define MAX(a, b) ( a > b ) ? a : b
 
 const double lightbeam_vector[3] = {-0.57735026919, -0.57735026919, -0.57735026919};
 
 // Structure used to represent a scene by its parameters
 typedef struct scene_params {
     // Object color
-    unsigned char object_r[4];
-    unsigned char object_g[4];
-    unsigned char object_b[4];
+    unsigned char object_r;
+    unsigned char object_g;
+    unsigned char object_b;
 
     // Background color
-    unsigned char background_r[4];
-    unsigned char background_g[4];
-    unsigned char background_b[4];
+    unsigned char background_r;
+    unsigned char background_g;
+    unsigned char background_b;
 
     // Camera coordinates
     float camera_coordinates[3];
@@ -32,6 +38,13 @@ typedef struct scene_params {
     float near_clip;
 
 } scene_struct;
+
+typedef struct pixel {
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+    float depth;
+} pixel;
 
 /**
  * Load the data of the triangles into an array of float
@@ -52,8 +65,17 @@ float *load_triangles(FILE *fp, unsigned int number_triangles) {
  * @param scene The structure in which the params are saved
  */
 void load_scene_params(FILE *fp, scene_struct *scene) {
-    fscanf(fp, "%s %s %s", scene->object_r, scene->object_g, scene->object_b);
-    fscanf(fp, "%s %s %s", scene->background_r, scene->background_g, scene->background_b);
+    unsigned int color_r, color_g, color_b;
+
+    fscanf(fp, "%i %i %i", &color_r, &color_g, &color_b);
+    scene->object_r = color_r;
+    scene->object_g = color_g;
+    scene->object_b = color_b;
+
+    fscanf(fp, "%i %i %i", &color_r, &color_g, &color_b);
+    scene->background_r = color_r;
+    scene->background_g = color_g;
+    scene->background_b = color_b;
 
     float camera_x, camera_y, camera_z;
     fscanf(fp, "%f %f %f", &camera_x, &camera_y, &camera_z);
@@ -72,17 +94,16 @@ void load_scene_params(FILE *fp, scene_struct *scene) {
 /**
  * Give the index of the beginning of triangle
  * @param triangle_idx the index of the triangle
- * @param number_triangles The number of triangles
  */
 int get_triangle(int triangle_idx) {
-    return triangle_idx *= 9;
+    triangle_idx *= 9;
+    return triangle_idx;
 }
 
 /**
  * Give the index of a vertex in a given triangle
  * @param triangle_idx The index of the triangle
  * @param point_idx The vertex (a,b,c)
- * @param number_triangles The number of triangles
  */
 int get_point(int triangle_idx, int point_idx) {
     assert(point_idx >= 0 && point_idx < 3);
@@ -94,7 +115,6 @@ int get_point(int triangle_idx, int point_idx) {
  * @param triangle_idx The index of the triangle
  * @param point_idx The vertex of choice (a,b,c)
  * @param coord_idx The coordinate of choice (x,y,z)
- * @param number_triangles The number of triangles
  */
 int get_coord(int triangle_idx, int point_idx, int coord_idx) {
     assert(coord_idx >= 0 && coord_idx < 3);
@@ -121,7 +141,7 @@ void compute_vector(const float *triangles, float *components, const unsigned in
  * @param size The size of the vector
  * @return A scalar
  */
-double compute_norm(float *vector, size_t size) {
+double euclidian_norm(float *vector, size_t size) {
     double result = 0;
     for (size_t i = 0; i < size; i++) {
         result += pow(vector[i], 2);
@@ -135,7 +155,7 @@ double compute_norm(float *vector, size_t size) {
  * @param u The first vector
  * @param v The second vector
  */
-void vector_product(float *result, const float *u, const float *v) {
+void compute_vector_product(float *result, const float *u, const float *v) {
     result[0] = u[1] * v[2] - u[2] * v[1];
     result[1] = u[2] * v[0] - u[0] * v[2];
     result[2] = u[0] * v[1] - u[1] * v[0];
@@ -171,11 +191,7 @@ void scale_vector(float *v, float scale, size_t size) {
 void compute_shading_params(const float *triangles, float *shading_params,
                             const unsigned int number_triangles) {
 
-    for (int i = 0; i < (int) number_triangles; i++) {
-        // ######################################
-        // # Compute the normal of the triangle #
-        // ######################################
-
+    for (unsigned int i = 0; i < number_triangles; i++) {
         // Declare variables
         float vector_ab[3] = {0, 0, 0}, vector_ac[3] = {0, 0, 0}, vector_normal[3] = {0, 0, 0};
         float shading_value = 0;
@@ -185,13 +201,11 @@ void compute_shading_params(const float *triangles, float *shading_params,
         compute_vector(triangles, vector_ac, get_point(i, 0), get_point(i, 2));
 
         // Compute the normal vector
-        vector_product(vector_normal, vector_ab, vector_ac);
-        double norm = compute_norm(vector_ab, 3) * compute_norm(vector_ac, 3);
+        compute_vector_product(vector_normal, vector_ab, vector_ac);
+        double norm = euclidian_norm(vector_ab, 3) * euclidian_norm(vector_ac, 3);
         scale_vector(vector_normal, 1.0 / norm, 3);
 
-        // #################################
-        // # Compute the shading parameter #
-        // #################################
+        // Compute the shading parameter
         float result = scalar_product(vector_normal, (float *) lightbeam_vector, 3);
         if (result > 0)
             shading_value = result;
@@ -200,17 +214,15 @@ void compute_shading_params(const float *triangles, float *shading_params,
     }
 }
 
-void compute_world_to_view_coordinate(float *triangles, scene_struct *scene, const unsigned int number_triangles) {
-
+void compute_world_to_view_coordinates(float *triangles, scene_struct *scene, const unsigned int number_triangles) {
     // Declare variables
     float E_u[3], E_v[3], *E_w;
     float camera_distance;
     float ground_plan_distance;
 
     // Compute the distances
-    camera_distance = compute_norm(scene->camera_coordinates, 3);
-    float vector_tmp[2] = {scene->camera_coordinates[0], scene->camera_coordinates[1]};
-    ground_plan_distance = compute_norm(vector_tmp, 2);
+    camera_distance = euclidian_norm(scene->camera_coordinates, 3);
+    ground_plan_distance = euclidian_norm(scene->camera_coordinates, 2);
 
     // Compute E_u
     E_u[0] = scene->camera_coordinates[2];
@@ -240,7 +252,7 @@ void compute_world_to_view_coordinate(float *triangles, scene_struct *scene, con
         for (int j = 0; j < 3; j++) {
             w_to_v[i][j] = new_system[i][j];
         }
-        w_to_v[i][3] = - scalar_product(vector_om, new_system[i], 3);
+        w_to_v[i][3] = -scalar_product(vector_om, new_system[i], 3);
     }
 
     // Iterate over the triangles
@@ -248,10 +260,11 @@ void compute_world_to_view_coordinate(float *triangles, scene_struct *scene, con
 
         // Iterate over the points of a triangle
         for (int j = 0; j < 3; j++) {
-            float vector_column[4] = {get_coord(i, j, 0), get_coord(i, j, 1), get_coord(i, j, 2), 1.0};
+            float vector_column[4] = {triangles[get_coord(i, j, 0)], triangles[get_coord(i, j, 1)],
+                                      triangles[get_coord(i, j, 2)], 1.0};
 
             // Iterate over the coordinates of the point
-            for(int k = 0; k < 3; k++){
+            for (int k = 0; k < 3; k++) {
                 int index = get_coord(i, j, k);
                 triangles[index] = scalar_product(w_to_v[k], vector_column, 4);
             }
@@ -259,14 +272,169 @@ void compute_world_to_view_coordinate(float *triangles, scene_struct *scene, con
     }
 }
 
-int main(int argc, char **argv) {
+void compute_view_to_projection_coordinates(float *triangles, scene_struct *scene, unsigned number_triangles) {
+    // Compute S_y and S_x
+    float S_y = 1 / tan(scene->vertical_fow / 2);
+    float S_x = S_y / (scene->width / scene->height);
 
-    // Parameters check
-    if (argc != 4) {
-        printf("-- Missing parameters --\n"
-               "1. Data file (e.g. bun.dat)\n2. Parameter file (e.g. param_bun.txt)\n3. Output file (e.g. bun.ppm)");
-        return 1;
+    // Compute the view to projection matrix
+    float v_to_p[3][4];
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 4; j++)
+            v_to_p[i][j] = 0;
     }
+    v_to_p[0][0] = S_x;
+    v_to_p[1][1] = S_y;
+    v_to_p[2][2] = (scene->near_clip + scene->far_clip) / (scene->near_clip - scene->far_clip);
+    v_to_p[2][3] = -1;
+
+    // Iterate over the number of triangles
+    for (unsigned int i = 0; i < number_triangles; i++) {
+
+        // Iterate over the points of a triangle
+        for (unsigned int j = 0; j < 3; j++) {
+            float vector_column[4] = {get_coord(i, j, 0), get_coord(i, j, 1), get_coord(i, j, 2), 1.0};
+            float scaling_factor = (scene->near_clip - scene->far_clip) / (2 * scene->near_clip * scene->far_clip *
+                                                                           get_coord(i, j, 2));
+
+            // Iterate over the coordinates of a point
+            for (unsigned int k = 0; k < 3; k++) {
+                int index = get_coord(i, j, k);
+                triangles[index] = scalar_product(v_to_p[k], vector_column, 4) * scaling_factor;
+            }
+        }
+    }
+}
+
+void init_pixels(pixel *pixels, scene_struct *scene) {
+    unsigned int number_pixels = scene->width * scene->height;
+    for (unsigned int i = 0; i < number_pixels; i++) {
+        pixels[i].depth = 1;
+        pixels[i].r = scene->background_r;
+        pixels[i].g = scene->background_g;
+        pixels[i].b = scene->background_b;
+    }
+}
+
+bool is_inside(float pxl_x, float pxl_y, unsigned int trgl_idx, float *triangles) {
+    float vector1[3] = {0, 0, 0}, vector2[3] = {0, 0, 0}, vector3[3] = {0, 0, 0};
+    float point_p[2] = {pxl_x, pxl_y};
+    float vector_product1[3], vector_product2[3];
+
+    // First inequality
+    for (unsigned int i = 0; i < 2; i++) {
+        vector1[i] = triangles[get_coord(trgl_idx, 1, i)] - triangles[get_coord(trgl_idx, 0, i)]; // AB
+        vector2[i] = triangles[get_coord(trgl_idx, 2, i)] - triangles[get_coord(trgl_idx, 0, i)]; // AC
+        vector3[i] = point_p[i] - triangles[get_coord(trgl_idx, 0, i)]; // AP
+    }
+
+    compute_vector_product(vector_product1, vector1, vector3);
+    compute_vector_product(vector_product2, vector3, vector2);
+    if (scalar_product(vector_product1, vector_product2, 3) < 0) {
+        return false;
+    }
+
+    // Second inequality
+    for (unsigned int i = 0; i < 2; i++) {
+        vector1[i] = triangles[get_coord(trgl_idx, 2, i)] - triangles[get_coord(trgl_idx, 1, i)]; // BC
+        vector2[i] = triangles[get_coord(trgl_idx, 0, i)] - triangles[get_coord(trgl_idx, 1, i)]; // BA
+        vector3[i] = point_p[i] - triangles[get_coord(trgl_idx, 1, i)];  // BP
+    }
+
+    compute_vector_product(vector_product1, vector1, vector3);
+    compute_vector_product(vector_product2, vector3, vector2);
+    if (scalar_product(vector_product1, vector_product2, 3) < 0) {
+        return false;
+    }
+
+    return true;
+}
+
+unsigned int get_pxl_x(float value, scene_struct *scene) {
+    return 2 * (value + 0.5) / (scene->width - 1);
+}
+
+unsigned int get_pxl_y(float value, scene_struct *scene) {
+    return -2 * (value + 0.5) / (scene->height + 1);
+}
+
+float compute_pixel_depth(const float pxl_x, const float pxl_y, float *triangles, const unsigned int triangle_idx) {
+    float triangle_points[3][2], w_a, w_b, w_c;
+    for (unsigned int i = 0; i < 3; i++) {
+        for (unsigned int j = 0; j < 2; j++) {
+            triangle_points[i][j] = triangles[get_coord(triangle_idx, i, j)];
+        }
+    }
+
+    // Temporary values to improve readability; in the end -> (num1 - num2) / (denum1 - denum2)
+    float num1, num2, denum1, denum2;
+
+    num1 = (triangle_points[1][0] - triangle_points[0][0]) * (pxl_y - triangle_points[0][1]);
+    num2 = (triangle_points[1][1] - triangle_points[0][1]) * (pxl_x - triangle_points[0][0]);
+    denum1 = (triangle_points[1][0] - triangle_points[0][0]) * (triangle_points[2][1] - triangle_points[0][1]);
+    denum2 = (triangle_points[1][1] - triangle_points[0][1]) * (triangle_points[2][0] - triangle_points[0][0]);
+    w_a = (num1 - num2) / (denum1 - denum2);
+
+    num1 = (triangle_points[0][0] - triangle_points[2][0]) * (pxl_y - triangle_points[2][1]);
+    num2 = (triangle_points[0][1] - triangle_points[2][1]) * (pxl_x - triangle_points[2][0]);
+    denum1 = (triangle_points[0][0] - triangle_points[2][0]) * (triangle_points[1][1] - triangle_points[2][1]);
+    denum2 = (triangle_points[0][1] - triangle_points[2][1]) * (triangle_points[1][0] - triangle_points[2][0]);
+    w_b = (num1 - num2) / (denum1 - denum2);
+
+    w_c = 1 - w_a - w_b;
+
+    float depth = w_a * triangles[get_coord(triangle_idx, 0, 2)];
+    depth += w_b * triangles[get_coord(triangle_idx, 1, 2)];
+    depth += w_c * triangles[get_coord(triangle_idx, 2, 2)];
+    return depth;
+}
+
+void compute_pixels(float *triangles, pixel *pixels, scene_struct *scene,
+                    const unsigned int number_triangles, float *shading_params) {
+
+    // Iterate over the triangles
+    for (unsigned int triangle_idx = 0; triangle_idx < number_triangles; triangle_idx++) {
+
+        float min_x = FLT_MAX, max_x = -FLT_MAX;
+        float min_y = FLT_MAX, max_y = -FLT_MAX;
+
+        // Iterate over the points of the triangle to define a square of search
+        for (unsigned int point_idx = 0; point_idx < 3; point_idx++) {
+            min_x = MIN(min_x, triangles[get_coord(triangle_idx, point_idx, 0)]);
+            min_y = MIN(min_y, triangles[get_coord(triangle_idx, point_idx, 1)]);
+            max_x = MAX(max_x, triangles[get_coord(triangle_idx, point_idx, 0)]);
+            max_y = MAX(max_y, triangles[get_coord(triangle_idx, point_idx, 1)]);
+        }
+
+        // Notation: pixel[i][j]
+        // TODO: Something is wrong with this computation -> The values are too big
+        unsigned int min_j = round((min_x * (scene->width - 1) / 2) - 0.5);
+        unsigned int max_j = round((max_x * (scene->width - 1) / 2) - 0.5);
+        unsigned int min_i = round((-min_y * (scene->height + 1) / 2) - 0.5);
+        unsigned int max_i = round((-max_y * (scene->height + 1) / 2) - 0.5);
+
+        // TODO: put a flag to improve computation (out of the triangle -> can skip (=continue) the line)
+        for (unsigned int i = min_i; i < max_i; i++) {
+            for (unsigned int j = min_j; j < max_j; j++) {
+                float pxl_x = get_pxl_x(j, scene);
+                float pxl_y = get_pxl_y(i, scene);
+
+                if (!is_inside(pxl_x, pxl_y, triangle_idx, triangles))
+                    continue;
+
+                float pixel_depth = compute_pixel_depth(pxl_x, pxl_y, triangles, triangle_idx);
+                if(pixel_depth < pixels[i % scene->width + j].depth){
+                    pixels[i % scene->width + j].depth = pixel_depth;
+                    pixels[i % scene->width + j].r = scene->object_r * shading_params[triangle_idx];
+                    pixels[i % scene->width + j].g = scene->object_g * shading_params[triangle_idx];
+                    pixels[i % scene->width + j].b = scene->object_b * shading_params[triangle_idx];
+                }
+            }
+        }
+    }
+}
+
+int main(int argc, char **argv) {
 
     FILE *dataFile = fopen(argv[1], "r");
     if (dataFile == NULL) {
@@ -284,7 +452,6 @@ int main(int argc, char **argv) {
     // Read the number of triangles
     unsigned int number_triangles;
     fread(&number_triangles, sizeof(unsigned int), 1, dataFile);
-    printf("\nNumber of triangles: %i\n", number_triangles);
 
     // Store the triangles
     float *triangles = load_triangles(dataFile, number_triangles);
@@ -297,12 +464,27 @@ int main(int argc, char **argv) {
     float *shading_params = malloc(number_triangles * sizeof(float));
     compute_shading_params(triangles, shading_params, number_triangles);
 
+    printf("[LOG] Shading parameters computed\n");
+
     // Change of coordinates
-    compute_world_to_view_coordinate(triangles, &scene, number_triangles);
+    compute_world_to_view_coordinates(triangles, &scene, number_triangles);
+    compute_view_to_projection_coordinates(triangles, &scene, number_triangles);
+
+    printf("[LOG] Change of coordinates computed\n");
+
+    // Allocate space for the pixels
+    pixel *pixels = malloc(scene.height * scene.width * sizeof(pixel));
+    init_pixels(pixels, &scene);
+
+    // Compute pixel color
+    compute_pixels(triangles, pixels, &scene, number_triangles, shading_params);
+
+    printf("[LOG] Pixels computed\n");
 
     // Terminate program
     free(triangles);
     free(shading_params);
+    free(pixels);
 
     return 0;
 }
