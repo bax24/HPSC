@@ -192,13 +192,18 @@ void compute_shading_params(const float *triangles, float *shading_params,
 
         // Compute the normal vector
         compute_vector_product(vector_normal, vector_ab, vector_ac);
-        double norm = euclidian_norm(vector_ab, 3) * euclidian_norm(vector_ac, 3);
+
+        // Compute the norm of the vector product of AB and AC
+        float tmp_vector[3];
+        compute_vector_product(tmp_vector, vector_ab, vector_ac);
+        double norm = euclidian_norm(tmp_vector, 3);
+
         scale_vector(vector_normal, 1.0 / norm, 3);
 
         // Compute the shading parameter
         float result = scalar_product(vector_normal, (float *) lightbeam_vector, 3);
-        if (result > 0)
-            shading_value = result;
+        if (result < 0)
+            shading_value = - result;
 
         shading_params[i] = shading_value;
     }
@@ -225,7 +230,7 @@ void compute_world_to_view_coordinates(float *triangles, const scene_struct *sce
     E_v[0] = -scene->camera_coordinates[0] * scene->camera_coordinates[1];
     E_v[1] = pow(scene->camera_coordinates[2], 2) + pow(scene->camera_coordinates[0], 2);
     E_v[2] = -scene->camera_coordinates[1] * scene->camera_coordinates[2];
-    scale_vector(E_v, 1.0 / camera_distance * ground_plan_distance, 3);
+    scale_vector(E_v, 1.0 / (camera_distance * ground_plan_distance), 3);
 
     // Compute E_w
     for (unsigned int i = 0; i < 3; i++) {
@@ -358,7 +363,7 @@ float compute_pixel_depth(const float pxl_x, const float pxl_y, float *triangles
     num2 = (point_b[1] - point_a[1]) * (point_p[0] - point_a[0]);
     denum1 = (point_b[0] - point_a[0]) * (point_c[1] - point_a[1]);
     denum2 = (point_b[1] - point_a[1]) * (point_c[0] - point_a[0]);
-    w_a = (num1 - num2) / (denum1 - denum2);
+    w_c = (num1 - num2) / (denum1 - denum2);
 
     num1 = (point_a[0] - point_c[0]) * (point_p[1] - point_p[1]);
     num2 = (point_a[1] - point_c[1]) * (point_p[0] - point_c[0]);
@@ -366,7 +371,7 @@ float compute_pixel_depth(const float pxl_x, const float pxl_y, float *triangles
     denum2 = (point_a[1] - point_c[1]) * (point_b[0] - point_c[0]);
     w_b = (num1 - num2) / (denum1 - denum2);
 
-    w_c = 1 - w_a - w_b;
+    w_a = 1 - w_a - w_c;
 
     float depth = w_a * triangles[get_coord(triangle_idx, 0, 2)];
     depth += w_b * triangles[get_coord(triangle_idx, 1, 2)];
@@ -379,6 +384,9 @@ void compute_pixels(float *triangles, pixel *pixels, const scene_struct *scene,
 
     // Iterate over the triangles
     for (unsigned int triangle_idx = 0; triangle_idx < number_triangles; triangle_idx++) {
+
+        if(triangle_idx % 10000 == 0)
+            printf("%f \n", (float) triangle_idx / number_triangles);
 
         float min_x = 1, max_x = -1;
         float min_y = 1, max_y = -1;
@@ -413,14 +421,14 @@ void compute_pixels(float *triangles, pixel *pixels, const scene_struct *scene,
                     continue;
 
                 float pixel_depth = compute_pixel_depth(pxl_x, pxl_y, triangles, triangle_idx);
-                if (pixel_depth < pixels[i % scene->width + j].depth) {
+                if (pixel_depth < pixels[i * scene->width + j].depth || pixel_depth == 1) {
 
                     // Update the depth
-                    pixels[i % scene->width + j].depth = pixel_depth;
+                    pixels[i * scene->width + j].depth = pixel_depth;
 
                     // Set the color
                     for (unsigned int k = 0; k < 3; k++)
-                        pixels[i % scene->width + j].color[k] = scene->object_color[k] * shading_params[triangle_idx];
+                        pixels[i * scene->width + j].color[k] = scene->object_color[k] * shading_params[triangle_idx];
                 }
             }
         }
@@ -469,7 +477,7 @@ int main(int argc, char **argv) {
     compute_pixels(triangles, pixels, &scene, number_triangles, shading_params);
 
     // Generate PPM image
-    savePPM(scene.width, scene.height, pixels, &scene);
+    savePPM(pixels, &scene, argv[3]);
 
     // Terminate program
     free(triangles);
